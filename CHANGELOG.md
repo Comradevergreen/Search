@@ -53,6 +53,7 @@ in [ROADMAP.md](ROADMAP.md).
 
 ### Fixed
 
+- Swiping to another space shows its tab groups folded as you left them on the way in. Every tab of a folded group used to come out while the space slid in, and fold back away as it landed.
 - A space you left on an empty tab opens on an empty tab again, after Search is quit and opened or from another window, instead of on the last tab of its row, often the last page of a folded tab group, which then came out of its folder.
 - Passwords brought over from Chrome include the ones it keeps for your Google account, in a file of their own when Chrome is signed in without sync: read alone, the usual file could hold next to nothing. And Bring Things Over says how many passwords didn't decrypt with the browser's key, instead of counting them as nothing.
 - Vimium C's options page opens instead of staying blank, and its keys work in pages. Three things stood in its way. WebKit hands out runtime.getPlatformInfo afresh at each read, and a copy called with another `this`, as Vimium C's worker calls it, never answered: the worker waited on it forever and turned every connection away, from its options page and from the pages its keys work in. A port's listener was handed another object for the same port, without what the worker had kept on it. And an extension page listing several module scripts, one waiting on a top-level await, ran the next one before the first had finished, as Chrome doesn't; such pages now load their modules as one, in their order.

@@ -1337,6 +1337,7 @@ final class Bench {
                 let outcome = Result { try source.read(profile: profile) }
                 switch outcome {
                 case .success(let read): out["read"] = read.logins.count; out["skipped"] = read.skipped
+                    out["undecrypted"] = read.undecrypted
                 case .failure(let error): out["error"] = "\(error)"
                 }
                 browser.took(outcome, from: source.name)
@@ -2836,6 +2837,17 @@ final class Bench {
                 "tabs": browser.tabs.count,
                 "making": browser.makingSpace,
                 "swipe": Double(browser.spaceSwipe),
+                // Each space off screen as a swipe draws it passing by
+                // (Parked.drawn): its groups, folded or not, and their tabs.
+                "drawn": Dictionary(uniqueKeysWithValues: browser.parked.map { id, row in
+                    let (groups, loose) = row.drawn(groupsOn: browser.prefs.usesTabGroups, splitView: browser.prefs.splitView)
+                    return (browser.spaces.first { $0.id == id }?.name ?? id.uuidString, [
+                        "groups": groups.map { ["name": $0.group.name, "collapsed": $0.group.collapsed,
+                                                "tabs": $0.tabs.map(Bench.short)] as [String: Any] },
+                        "loose": loose.map(Bench.short),
+                        "active": row.active.map { id in row.tabs.first { $0.id == id }.map(Bench.short) ?? "" } ?? "",
+                    ] as [String: Any])
+                }),
                 "pages": Web.pages.allObjects.map { $0.configuration.websiteDataStore.identifier?.uuidString ?? "default" },
             ]
             // And the stores WebKit keeps by identifier, a moment later —

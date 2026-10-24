@@ -233,18 +233,43 @@ struct TabBar: View {
             let row = space.id == browser.spaceID
                 ? Parked(tabs: browser.tabs, active: browser.activeID, splits: browser.splits)
                 : browser.parked[space.id] ?? Parked(tabs: [], active: nil)
-            let shown = rowTabs(row.tabs, splits: row.splits)
+            let groupsOn = browser.prefs.usesTabGroups
+            // Its groups as they were left, folded or not (see Parked.drawn):
+            // drawn flat, a folded group's tabs came out for the swipe.
+            let (groups, loose) = row.drawn(groupsOn: groupsOn, splitView: browser.prefs.splitView)
+            let pins = rowTabs(row.tabs, splits: row.splits).filter { $0.pin != nil }
+            let shown = groupsOn ? pins + groups.flatMap(\.tabs) + loose : rowTabs(row.tabs, splits: row.splits)
             let each = width(in: strip, tabs: shown, splits: row.splits)
-            // The neighbour draws no group headings, so its line only ever
-            // stands between its pins and its own loose tabs.
-            let line = TabBar.showsPinLine(shown)
+            let line = TabBar.showsPinLine(shown, groups: groups.count)
             let firstLoose = shown.firstIndex { $0.pin == nil }
             HStack(spacing: Metrics.tabGap) {
-                ForEach(Array(shown.enumerated()), id: \.element.id) { index, tab in
-                    if line, index == firstLoose { PinLine() }
-                    rowItem(tab, in: row.tabs, splits: row.splits, activeID: row.active,
-                            width: each, room: strip - lights - 12,
-                            height: Metrics.strip, interactive: false, pill: pill)
+                if groupsOn {
+                    ForEach(pins) { tab in
+                        rowItem(tab, in: row.tabs, splits: row.splits, activeID: row.active,
+                                width: each, room: strip - lights - 12,
+                                height: Metrics.strip, interactive: false, pill: pill)
+                    }
+                    if line { PinLine() }
+                    ForEach(groups) { drawn in
+                        GroupHeading(browser: browser, group: drawn.group, horizontal: true)
+                        ForEach(drawn.tabs) { tab in
+                            rowItem(tab, in: row.tabs, splits: row.splits, activeID: row.active,
+                                    width: each, room: strip - lights - 12,
+                                    height: Metrics.strip, interactive: false, pill: pill)
+                        }
+                    }
+                    ForEach(loose) { tab in
+                        rowItem(tab, in: row.tabs, splits: row.splits, activeID: row.active,
+                                width: each, room: strip - lights - 12,
+                                height: Metrics.strip, interactive: false, pill: pill)
+                    }
+                } else {
+                    ForEach(Array(shown.enumerated()), id: \.element.id) { index, tab in
+                        if line, index == firstLoose { PinLine() }
+                        rowItem(tab, in: row.tabs, splits: row.splits, activeID: row.active,
+                                width: each, room: strip - lights - 12,
+                                height: Metrics.strip, interactive: false, pill: pill)
+                    }
                 }
             }
             .frame(height: Metrics.strip)

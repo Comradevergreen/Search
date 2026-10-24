@@ -258,9 +258,7 @@ struct SideBar: View {
     private func preview(_ row: Parked, pill: Namespace.ID) -> some View {
         let pins = row.tabs.filter { $0.pin != nil && !($0.listed && prefs.showsPinRows) }
         let listed = prefs.showsPinRows ? row.tabs.filter { $0.pin != nil && $0.listed } : []
-        let rest = row.tabs.filter { tab in
-            tab.pin == nil && (!prefs.splitView || !row.splits.contains(where: { $0.right == tab.id }))
-        }
+        let (groups, rest) = row.drawn(groupsOn: prefs.usesTabGroups, splitView: prefs.splitView)
         let cells = pinCells(pins.count)
         return VStack(alignment: .leading, spacing: 0) {
             if !pins.isEmpty {
@@ -279,7 +277,15 @@ struct SideBar: View {
                     SideRow(browser: browser, prefs: prefs, tab: tab, live: tab.id == row.active,
                             pill: pill, close: {}, interactive: false)
                 }
-                // Groups aren't drawn here, so the line goes over all the rest.
+                // Its groups, folded as they were left (see Parked.drawn).
+                ForEach(groups) { drawn in
+                    GroupHeading(browser: browser, group: drawn.group)
+                    ForEach(drawn.tabs) { tab in
+                        rowItem(tab, tabs: row.tabs, splits: row.splits, activeID: row.active,
+                                interactive: false, pill: pill, close: {})
+                    }
+                }
+                // Under the groups, as on screen.
                 if showsLine(listed: listed.count, loose: rest.count) {
                     KeepLine(clears: false) {}
                 }
