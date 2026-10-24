@@ -114,6 +114,19 @@ struct GroupHeading: View {
         .contextMenu {
             Button("Rename Group") { browser.editingGroupID = group.id }
             Button(group.collapsed ? "Expand Group" : "Collapse Group") { browser.toggleTabGroup(group.id) }
+            // The whole group into another space, still a group there: Arc's
+            // folders came in wherever Arc had them.
+            if browser.prefs.usesSpaces, browser.spaces.count > 1 {
+                Menu("Move Group to Space") {
+                    ForEach(browser.spaces.filter { $0.id != browser.spaceID }) { space in
+                        Button {
+                            browser.move(group: group.id, toSpace: space.id)
+                        } label: {
+                            Label(space.name, systemImage: space.symbol)
+                        }
+                    }
+                }
+            }
             Divider()
             Button("Ungroup Tabs") { browser.removeTabGroup(group.id) }
             Button("Close Group") { browser.closeTabGroup(group.id) }

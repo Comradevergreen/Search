@@ -3330,8 +3330,64 @@ final class Browser: NSObject, ObservableObject {
         }
     }
 
+    /// Group menu › Move Group to Space: every tab of a group, in its order,
+    /// into another space, where it is the same group — its name, folded or
+    /// not — after that space's own groups. As Move to Space for one tab: a
+    /// space with other sign-ins asks first only when a page has unsaved
+    /// form entries, once for the group.
+    func move(group id: UUID, toSpace target: UUID) {
+        guard prefs.usesSpaces, target != spaceID,
+              let destination = spaces.first(where: { $0.id == target }),
+              let group = tabGroups.first(where: { $0.id == id })
+        else { return }
+        let members = tabs.filter { $0.groupID == id && $0.pin == nil && !$0.bench
+            && $0.address.flatMap({ Browser.extensionHost(of: $0) }) == nil }
+        guard !members.isEmpty else { return }
+        let from = spaceID
+        let complete: () -> Void = { [weak self] in
+            guard let self, self.spaceID == from else { return }
+            self.finishGroupMove(group, members.filter { tab in self.tabs.contains { $0.id == tab.id } }, to: destination)
+        }
+        let store = Spaces.store(for: target)
+        guard members.contains(where: { !$0.shy && $0.store !== store }) else { return complete() }
+        // Any page with something typed and not sent, asked once.
+        var unsaved = false
+        let asked = DispatchGroup()
+        for tab in members where !tab.shy && tab.store !== store {
+            asked.enter()
+            tab.unsaved { if $0 { unsaved = true }; asked.leave() }
+        }
+        asked.notify(queue: .main) {
+            guard unsaved else { return complete() }
+            Ask.sure(
+                "Move Group?",
+                detail: "A page in this group has unsaved form entries. The group will reopen in “\(destination.name)” with that Space’s sign-ins, so the entries may be lost.",
+                confirm: "Move",
+                then: complete
+            )
+        }
+    }
+
+    private func finishGroupMove(_ group: TabGroup, _ members: [Tab], to destination: Space) {
+        guard !members.isEmpty else { return }
+        // The tab on screen goes with the group: the one after the group
+        // comes to the front instead, or the one before it, not each of the
+        // group's tabs in turn on the way out.
+        if let activeID, members.contains(where: { $0.id == activeID }) {
+            let ids = Set(members.map(\.id))
+            let at = tabs.firstIndex { $0.id == activeID } ?? 0
+            let after = tabs[at...].first { !ids.contains($0.id) && standsInRow($0) }
+            let before = tabs[..<at].last { !ids.contains($0.id) && standsInRow($0) }
+            if let next = after ?? before { select(next, floatPrevious: false) }
+        }
+        for tab in members { finishMove(tab, toSpace: destination.id, group: group, quietly: true) }
+        writeSession(now: true)
+        if let row = parked[destination.id] { writeSession(now: true, space: destination.id, row: row) }
+        announce("Moved \(group.name) to \(destination.name)")
+    }
+
     @discardableResult
-    private func finishMove(_ tab: Tab, toSpace id: UUID) -> Bool {
+    private func finishMove(_ tab: Tab, toSpace id: UUID, group: TabGroup? = nil, quietly: Bool = false) -> Bool {
         guard prefs.usesSpaces, id != spaceID,
               let destination = spaces.first(where: { $0.id == id }),
               let index = tabs.firstIndex(where: { $0.id == tab.id })
@@ -3355,9 +3411,15 @@ final class Browser: NSObject, ObservableObject {
         if tabs.isEmpty { adopt(Tab(configuration: Web.configuration(space: spaceID))) }
 
         tab.rehome(in: id)
-        // Its group stays behind: the space it goes to has groups of its own.
-        tab.groupID = nil
+        // Its group stays behind: the space it goes to has groups of its own
+        // — unless the whole group is going (Move Group to Space).
+        tab.groupID = group?.id
         var row = parked[id] ?? loadRow(id)
+        if let group {
+            var groups = row.groups ?? readRow(id).groups ?? []
+            if !groups.contains(where: { $0.id == group.id }) { groups.append(group) }
+            row.groups = groups
+        }
         // A pin is that space's pin from now on, in pins.json too: kept only
         // in its row, the next look at the space's pins (another window's
         // change, a change to the shared pins, or a relaunch before the space
@@ -3374,6 +3436,7 @@ final class Browser: NSObject, ObservableObject {
         if row.active == nil { row.active = tab.id }
         parked[id] = row
 
+        guard !quietly else { return true }
         writeSession(now: true)
         writeSession(now: true, space: id, row: row)
         announce("Moved to \(destination.name)")

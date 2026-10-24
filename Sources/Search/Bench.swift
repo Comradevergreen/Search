@@ -2007,6 +2007,17 @@ final class Bench {
         case "tospace":
             // Move to Space from a tab's menu, to the Nth space. Test runs only.
             guard Store.testing else { answer(["error": "tospace only works on a --test run"]); return }
+            // "group": a group by name, as its menu's Move Group to Space.
+            if let name = request["group"] as? String, let index = request["index"] as? Int,
+               browser.spaces.indices.contains(index - 1) {
+                guard let group = browser.tabGroups.first(where: { $0.name == name }) else {
+                    answer(["error": "no group “\(name)”"]); return
+                }
+                browser.move(group: group.id, toSpace: browser.spaces[index - 1].id)
+                answer(["space": browser.spaces[index - 1].name, "tabs": browser.tabs.map(Bench.short),
+                        "groups": browser.tabGroups.map(\.name)])
+                return
+            }
             guard let id = request["id"] as? String, let index = request["index"] as? Int,
                   let tab = browser.tabs.first(where: { Bench.short($0) == id }),
                   browser.spaces.indices.contains(index - 1)
