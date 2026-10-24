@@ -971,7 +971,8 @@ final class Browser: NSObject, ObservableObject {
         case .success(let found):
             let kept = keep(found)
             ImportRecords.note(name, passwords: kept)
-            announce(kept == 0 ? "Nothing new in \(name)" : "\(kept) passwords from \(name)")
+            let locked = found.undecrypted > 0 ? " (\(found.undecrypted) couldn't be decrypted)" : ""
+            announce((kept == 0 ? "Nothing new in \(name)" : "\(kept) passwords from \(name)") + locked)
         case .failure(Chromium.Trouble.noPassphrase):
             announce("\(name) didn't give up its keychain key")
         case .failure(Mozilla.Trouble.primaryPassword):
