@@ -1210,8 +1210,9 @@ struct ContentView: View {
             guard event.type == .keyDown else {
                 let held = browser.prefs.showsTabShortcuts && event.modifierFlags.contains(.command)
                 if browser.commandHeld != held { browser.commandHeld = held }
-                // ⌃ let go of switches to the tab the switcher is on.
-                if browser.tabSwitcher.active, !event.modifierFlags.contains(.control) {
+                // ⌃ let go of switches to the tab the switcher is on — or
+                // whichever its key is held with (Settings › Shortcuts).
+                if browser.tabSwitcher.active, !ShortcutStore.shared.recentHeld(event.modifierFlags) {
                     browser.commitTabSwitch()
                 }
                 // ⌘ let go of ends a ⌘K walk, wherever it stopped.
@@ -1333,14 +1334,15 @@ struct ContentView: View {
         guard !ShortcutStore.shared.recording else { return false }
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         let key = event.shortcutCharacters
-        let controlTab = event.keyCode == 48 && flags.contains(.control)
-            && flags.isDisjoint(with: [.command, .option])
+        // ⌃Tab, or the key Settings › Shortcuts gave the switcher instead,
+        // and whether ⇧ sends it back.
+        let recent = ShortcutStore.shared.recentSwitch(event)
 
         // While the tab switcher is up, ⌃ and the arrows move through it and
         // ⌃Tab goes on below; any other key puts it away, and Escape does
-        // nothing else.
-        if browser.tabSwitcher.active, !controlTab {
-            if flags.contains(.control), flags.isDisjoint(with: [.command, .option]) {
+        // nothing else. ⌃ is whatever the switcher's key is held with.
+        if browser.tabSwitcher.active, recent == nil {
+            if ShortcutStore.shared.recentOnly(flags) {
                 let direction: TabSwitcher.Direction? = switch event.keyCode {
                 case 123: .left
                 case 124: .right
@@ -1458,16 +1460,19 @@ struct ContentView: View {
         //
         // While an address is being typed, the list under the field is what
         // there is to move through, and Return takes whatever the walk landed on.
-        if event.keyCode == 48, !flags.contains(.command), !flags.contains(.option) {
-            if flags.contains(.control) {
-                if canSwitchTabs(event) {
-                    // A Tab held down doesn't race through them.
-                    if !event.isARepeat { browser.switchTabs(backwards: flags.contains(.shift)) }
-                    return true
-                }
-                browser.step(flags.contains(.shift) ? -1 : 1)
+        //
+        // The switcher's key can be another (Settings › Shortcuts, as in
+        // Arc); ⌃Tab is then whatever command has it, or the page's.
+        if let backwards = recent {
+            if canSwitchTabs(event) {
+                // A key held down doesn't race through them.
+                if !event.isARepeat { browser.switchTabs(backwards: backwards) }
                 return true
             }
+            browser.step(backwards ? -1 : 1)
+            return true
+        }
+        if event.keyCode == 48, !flags.contains(.command), !flags.contains(.option), !flags.contains(.control) {
             if browser.editingTab != nil { return true }
             // "red" then Tab: Reddit, in the field (SiteSearch.swift).
             if browser.fieldShowing, !flags.contains(.shift), browser.lockSiteOffer() { return true }
