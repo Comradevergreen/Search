@@ -145,6 +145,13 @@ private struct PaneLayers: View {
                     .transition(.opacity)
             }
         }
+        .overlay(alignment: .topLeading) {
+            if let pairing = browser.applePairing, pairing.tab == tab.id {
+                ApplePairingCard(browser: browser, apple: browser.applePasswords, pairing: pairing)
+                    .transition(.opacity)
+            }
+        }
+        .animation(Motion.quick, value: browser.applePairing)
         .overlay(alignment: .topTrailing) { whose }
         .animation(Motion.quick, value: hovered)
         .background { SplitDropZone(browser: browser, tab: tab, kind: .stage) }

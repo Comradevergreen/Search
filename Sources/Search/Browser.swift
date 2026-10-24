@@ -797,8 +797,8 @@ final class Browser: NSObject, ObservableObject {
         // connect.
         let appleHost = prefs.applePasswords && prefs.fillsPasswords && passwords
             ? ApplePasswords.offers(on: tab.pageAddress, privateTab: tab.shy) : nil
-        let apple = ApplePasswords.shared
-        let connect = appleHost != nil && apple.state == .idle
+        let apple = applePasswords
+        let connect = appleHost != nil && apple.state == .idle && applePairing?.tab != tab.id
         appleAsk += 1
         // Asked only for the tab in front of you, in the window you are in.
         if let appleHost, apple.state == .paired, tab.built?.window?.isKeyWindow == true {
@@ -825,7 +825,8 @@ final class Browser: NSObject, ObservableObject {
         Task { [weak self] in
             // A page that moves the caret from box to box queues no backlog:
             // a question the caret has already left is never sent.
-            let found = await ApplePasswords.shared.logins(for: appleHost, tab: tab.id) { [weak self] in
+            guard let keeper = self?.applePasswords else { return }
+            let found = await keeper.logins(for: appleHost, tab: tab.id) { [weak self] in
                 self?.appleAsk == ask
             }
             guard let self, ask == appleAsk, let field, field.tab == tab.id, tab.id == activeID,
@@ -870,7 +871,8 @@ final class Browser: NSObject, ObservableObject {
             return
         }
         Task { [weak self] in
-            let found = await ApplePasswords.shared.password(for: apple.user, host: appleHost, tab: tab.id)
+            guard let keeper = self?.applePasswords else { return }
+            let found = await keeper.password(for: apple.user, host: appleHost, tab: tab.id)
             guard let self else { return }
             guard let found else {
                 announce("Apple Passwords didn't hand that password over")
@@ -889,17 +891,63 @@ final class Browser: NSObject, ObservableObject {
         }
     }
 
-    /// The row that connects Apple Passwords: Settings › Passwords, where the
-    /// code goes, and the pairing started.
+    /// The row that connects Apple Passwords: the pairing starts, and the
+    /// code is typed into a small card of Search's own where the list was,
+    /// not in Settings. Once paired, the caret goes back to the box and the
+    /// accounts come up under it.
     func connectApplePasswords() {
         lowering?.cancel()
         // The same half second as any row: a click already on its way when
         // a page put the caret in a box isn't a choice.
         guard let list = suggesting, Date().timeIntervalSince(list.shown) > 0.5 else { return }
         suggesting = nil
-        settingsPage = .passwords
-        tuning = true
-        Task { await ApplePasswords.shared.connect() }
+        beginApplePairing(on: list.tab, at: list.spot)
+    }
+
+    /// Pairing with Apple Passwords from under a sign-in box: the card that
+    /// takes the code, over the page it was asked from. Native, never in the
+    /// page; the page learns nothing of it.
+    @Published private(set) var applePairing: ApplePairing?
+
+    struct ApplePairing: Equatable {
+        let tab: Tab.ID
+        let spot: CGRect
+    }
+
+    /// The Passwords app's connection. One for the whole app; a test gives
+    /// its own, with a made-up helper.
+    var applePasswords = ApplePasswords.shared
+    private var pairingWatch: AnyCancellable?
+
+    func beginApplePairing(on tab: Tab.ID, at spot: CGRect) {
+        let apple = applePasswords
+        applePairing = ApplePairing(tab: tab, spot: spot)
+        pairingWatch = apple.$state
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] state in
+                MainActor.assumeIsolated {
+                    if state == .paired { self?.endApplePairing(paired: true) }
+                }
+            }
+        if apple.state == .idle { Task { await apple.connect() } }
+    }
+
+    /// The card goes. Paired: the caret back in the page's box, which says
+    /// so again (focusin), and its accounts are asked for. Cancelled: the
+    /// helper is stopped and its window with it.
+    func endApplePairing(paired: Bool) {
+        guard let pairing = applePairing else { return }
+        applePairing = nil
+        pairingWatch = nil
+        if !paired, applePasswords.state != .paired { applePasswords.disconnect() }
+        // Only the page it was asked from, still in front: never another.
+        guard pairing.tab == activeID, let tab = tabs.first(where: { $0.id == pairing.tab }),
+              let web = tab.built, let window = web.window
+        else { return }
+        looked = nil
+        pickedInto = nil
+        window.makeFirstResponder(web)
     }
 
     /// One of the accounts in the list, picked by name.

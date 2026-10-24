@@ -398,6 +398,88 @@ final class ApplePasswordsTests: XCTestCase {
 
 /// A helper made up in Swift: it pairs with `code`, keeps one account, and
 /// says what it was asked. The server's side of SRP-6a: B = kv + gᵇ,
+
+/// The code asked for where it is needed (Drice, 24 Oct): nothing runs the
+/// helper until you choose Connect, and the code goes into a card under the
+/// sign-in box instead of Settings, which goes once paired.
+@MainActor
+final class ApplePairingTests: XCTestCase {
+    override class func setUp() {
+        setenv("SEARCH_PROBE", "sec-apw2-\(getpid())", 1)
+        super.setUp()
+    }
+
+    override func setUp() { _ = NSApplication.shared }
+
+    func testNothingRunsUntilAsked() async {
+        var made = 0
+        let fake = FakeHelper(code: "246810")
+        let apple = ApplePasswords(makeLink: { made += 1; return fake })
+        // Asking for names unpaired, or a password, never starts a pairing.
+        let names = await apple.logins(for: "example.test", tab: UUID())
+        let found = await apple.password(for: "ada@example.test", host: "example.test", tab: UUID())
+        XCTAssertEqual(names, [])
+        XCTAssertNil(found)
+        XCTAssertEqual(made, 0)
+        XCTAssertEqual(fake.handshakes, 0)
+        await apple.connect()
+        XCTAssertEqual(made, 1)
+        XCTAssertEqual(fake.handshakes, 1)
+    }
+
+    func testCardPairsAndGoes() async throws {
+        let fake = FakeHelper(code: "246810")
+        let browser = Browser(record: WindowRecord())
+        defer { browser.closeAll() }
+        browser.applePasswords = ApplePasswords(makeLink: { fake })
+        let tab = UUID()
+        browser.beginApplePairing(on: tab, at: CGRect(x: 10, y: 20, width: 200, height: 30))
+        XCTAssertEqual(browser.applePairing?.tab, tab)
+        try await settle { browser.applePasswords.state == .code }
+        XCTAssertEqual(fake.handshakes, 1)
+        // A second Connect while one is under way starts no other handshake.
+        browser.beginApplePairing(on: tab, at: .zero)
+        try await Task.sleep(nanoseconds: 50_000_000)
+        XCTAssertEqual(fake.handshakes, 1)
+        await browser.applePasswords.enter("246810")
+        XCTAssertEqual(browser.applePasswords.state, .paired)
+        try await settle { browser.applePairing == nil }
+        XCTAssertFalse(fake.stopped)
+    }
+
+    func testCancelStopsTheHelper() async throws {
+        let fake = FakeHelper(code: "246810")
+        let browser = Browser(record: WindowRecord())
+        defer { browser.closeAll() }
+        browser.applePasswords = ApplePasswords(makeLink: { fake })
+        browser.beginApplePairing(on: UUID(), at: .zero)
+        try await settle { browser.applePasswords.state == .code }
+        browser.endApplePairing(paired: false)
+        XCTAssertNil(browser.applePairing)
+        XCTAssertEqual(browser.applePasswords.state, .idle)
+        XCTAssertTrue(fake.ended)
+        XCTAssertTrue(fake.stopped)
+    }
+
+    func testCancelKeepsAPairingAlreadyMade() async throws {
+        let fake = FakeHelper(code: "246810")
+        let browser = Browser(record: WindowRecord())
+        defer { browser.closeAll() }
+        browser.applePasswords = ApplePasswords(makeLink: { fake })
+        await browser.applePasswords.connect()
+        await browser.applePasswords.enter("246810")
+        browser.beginApplePairing(on: UUID(), at: .zero)
+        browser.endApplePairing(paired: false)
+        XCTAssertEqual(browser.applePasswords.state, .paired)
+        XCTAssertFalse(fake.stopped)
+    }
+
+    private func settle(_ done: @MainActor () -> Bool) async throws {
+        for _ in 0..<200 where !done() { try await Task.sleep(nanoseconds: 10_000_000) }
+        XCTAssertTrue(done())
+    }
+}
+
 /// S = (A·vᵘ)ᵇ.
 private final class FakeHelper: AppleLink {
     var onMessage: (([String: Any]) -> Void)?
