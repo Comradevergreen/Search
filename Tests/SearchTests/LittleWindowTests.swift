@@ -53,7 +53,7 @@ final class LittleWindowTests: XCTestCase {
     }
 
     func testPictureInPictureEndedByMacOSComesBackOnLeaving() async throws {
-        try await withPlayer(style: .system) { browser, _, floating in
+        try await withPlayer(style: .system) { browser, owner, floating in
             browser.toggleFloat()
             try await waitFor(floating)
             // macOS's own button puts the video back in its page, and Search
@@ -67,6 +67,22 @@ final class LittleWindowTests: XCTestCase {
             }
             let mode = try await presentation(tab)
             XCTAssertEqual(mode, "picture-in-picture", "leaving the app floats the video again")
+            // Out because of the app switch this time, not by hand.
+            browser.appBack(in: owner)
+            XCTAssertFalse(floating(), "the video the app switch floated comes back with its window")
+        }
+    }
+
+    func testPictureInPictureByHandStaysOutAcrossAppSwitch() async throws {
+        try await withPlayer(style: .system) { browser, owner, floating in
+            browser.toggleFloat()
+            try await waitFor(floating)
+            let tab = try XCTUnwrap(browser.active)
+            browser.appLeft()
+            // The page is asked again, and answers that it is out already.
+            _ = try await presentation(tab)
+            browser.appBack(in: owner)
+            XCTAssertTrue(floating(), "a video floated by hand stays out when its window comes forward")
         }
     }
 
@@ -97,18 +113,21 @@ final class LittleWindowTests: XCTestCase {
         _ body: (Browser, NSWindow, @escaping () -> Bool) async throws -> Void
     ) async throws {
         let browser = Browser(record: WindowRecord())
+        // Leaving the app floats only the front browser's video, and a test
+        // run before this one may have left its own browser in front.
+        let front = Front.shared.browser
+        Front.shared.set(browser)
         let previous = (browser.prefs.floatStyle, browser.prefs.floatsAway)
         let away = Float.benchAway
         let hosts = Players.benchHosts
         Players.benchHosts.insert("little-window.invalid")
         Float.benchAway = NSPoint(x: -30000, y: -30000)
         defer {
-            browser.land(covering: false)
-            browser.unpicture()
             Float.benchAway = away
             Players.benchHosts = hosts
             browser.prefs.floatStyle = previous.0
             browser.prefs.floatsAway = previous.1
+            Front.shared.set(front)
         }
         browser.prefs.floatStyle = style
         browser.prefs.floatsAway = true
@@ -118,7 +137,13 @@ final class LittleWindowTests: XCTestCase {
         browser.window = owner
         defer { owner.close() }
         let tab = browser.benchOpen(try XCTUnwrap(URL(string: "about:blank")))
-        defer { tab.close() }
+        defer {
+            // Home first, while the tab and its window are still there to
+            // take the page back.
+            browser.land(covering: false)
+            browser.unpicture()
+            tab.close()
+        }
         browser.activeID = tab.id
         owner.contentView = tab.web
         tab.web.loadHTMLString("<video style='width:320px;height:180px'></video><script>window.fixtureReady = true;</script>",

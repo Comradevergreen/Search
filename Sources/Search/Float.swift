@@ -100,6 +100,10 @@ final class Float {
     /// floating window is that window's until the fingers lift.
     private static var pinchWatch: Any?
     private static weak var pinched: Panel?
+    /// A pinch that began over a floating window is that window's to the
+    /// end, even if the window closes under the fingers: the page behind
+    /// would otherwise hear the rest of a pinch it never saw begin.
+    private static var steering = false
 
     private static func watchPinches() {
         guard pinchWatch == nil else { return }
@@ -112,11 +116,19 @@ final class Float {
     static func steer(_ event: NSEvent) -> Bool {
         if event.phase == .began || event.phase.isEmpty {
             let spot = event.window.map { $0.convertPoint(toScreen: event.locationInWindow) } ?? event.locationInWindow
-            pinched = NSApp.windows.lazy.compactMap { $0 as? Panel }.first { $0.isVisible && $0.frame.contains(spot) }
+            // The window on top there, of this app's, front to back: an
+            // alert or a popover over the floating window is the one pinched.
+            pinched = (NSWindow.windowNumbers(options: []) ?? []).lazy
+                .compactMap { NSApp.window(withWindowNumber: $0.intValue) }
+                .first { $0.isVisible && !$0.ignoresMouseEvents && $0.frame.contains(spot) } as? Panel
+            steering = pinched != nil
         }
-        guard let panel = pinched else { return false }
-        panel.onPinch?(event)
-        if event.phase.isEmpty || !event.phase.isDisjoint(with: [.ended, .cancelled]) { pinched = nil }
+        guard steering else { return false }
+        pinched?.onPinch?(event)
+        if event.phase.isEmpty || !event.phase.isDisjoint(with: [.ended, .cancelled]) {
+            steering = false
+            pinched = nil
+        }
         return true
     }
 
@@ -520,15 +532,23 @@ final class Float {
         /// back, so the video stays out (see Browser.appBack). With Search in
         /// front already, the keys stay where they are, and Float.steer
         /// brings the pinch here.
+        ///
+        /// Only a click: Search in front brings its browser window up too,
+        /// over the app you are in, and moving the video out of the way or
+        /// bringing it back from a side shouldn't.
         private func takeFocus() {
             let front = NSWorkspace.shared.frontmostApplication?.processIdentifier
             guard let window, front != ProcessInfo.processInfo.processIdentifier else { return }
             window.makeKey()
-            if #available(macOS 14, *) { NSApp.activate() } else { NSApp.activate(ignoringOtherApps: true) }
+            // Never a test run's: a probe started hidden stays off every screen.
+            guard !Store.testing else { return }
+            NSApp.activate()
         }
 
+        /// Whether the pointer went anywhere since the press: a move, not a click.
+        private var moved = false
+
         override func mouseDown(with event: NSEvent) {
-            takeFocus()
             guard let window else { return }
             // A click on the sliver of a docked window brings it back.
             if docked != nil {
@@ -537,10 +557,15 @@ final class Float {
                 return
             }
             ignoringDrag = false
+            moved = false
             stopGlide()
             grab = NSEvent.mouseLocation
             origin = window.frame
             stretching = atCorner(convert(event.locationInWindow, from: nil))
+        }
+
+        override func mouseUp(with event: NSEvent) {
+            if !ignoringDrag, !moved { takeFocus() }
         }
 
         override func mouseDragged(with event: NSEvent) {
@@ -548,6 +573,8 @@ final class Float {
             let now = NSEvent.mouseLocation
             let dx = now.x - grab.x
             let dy = now.y - grab.y
+            // A hand that shook a little as it clicked is still a click.
+            if hypot(dx, dy) > 3 { moved = true }
 
             guard stretching else {
                 window.setFrameOrigin(NSPoint(x: origin.minX + dx, y: origin.minY + dy))
@@ -842,7 +869,9 @@ final class Float {
         private var pinching: CGFloat = 0
 
         override func magnify(with event: NSEvent) {
-            guard let window else { return }
+            // Docked, only a sliver of it is on screen: nothing there to size,
+            // and sizing it would pull part of it back out at the side.
+            guard let window, docked == nil else { return }
             if event.phase == .began { pinching = 0 }
             pinching += event.magnification
 

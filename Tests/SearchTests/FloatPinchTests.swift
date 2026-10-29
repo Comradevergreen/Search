@@ -62,15 +62,32 @@ final class FloatPinchTests: XCTestCase {
         XCTAssertFalse(pinch(0.3, .changed, at: beside))
         XCTAssertEqual(panel.frame, sized)
 
+        // Under a window above it, an alert's say, the pinch is that window's.
+        let inside = NSPoint(x: panel.frame.minX + 20, y: panel.frame.minY + 20)
+        let alert = NSWindow(contentRect: NSRect(x: inside.x - 10, y: inside.y - 10, width: 40, height: 40),
+                             styleMask: [.borderless], backing: .buffered, defer: false)
+        alert.isReleasedWhenClosed = false
+        alert.level = .modalPanel
+        alert.orderFrontRegardless()
+        XCTAssertFalse(pinch(0, .began, at: inside), "a window over the floating one takes its own pinches")
+        XCTAssertFalse(pinch(0, .ended, at: inside))
+        alert.close()
+
+        // Closed under the fingers: the rest of that pinch is nobody's, and
+        // the page behind never hears a pinch it didn't see begin.
+        XCTAssertTrue(pinch(0, .began, at: inside))
         floater.drop()
         XCTAssertTrue(web.allowsMagnification)
-        XCTAssertFalse(pinch(0, .began, at: over), "a closed window takes no pinches")
+        XCTAssertTrue(pinch(0.3, .changed, at: inside), "the rest of a pinch begun over it is not the page's")
+        XCTAssertTrue(pinch(0, .ended, at: inside))
+        XCTAssertFalse(pinch(0, .began, at: inside), "a closed window takes no pinches")
     }
 
     /// With another app in front, macOS sends a pinch to that app: a click
     /// on the floating window brings Search in front with the keys in it,
-    /// and only a click, not the pointer passing over it. (A test run can't
-    /// come in front; the keys it can see.)
+    /// and only a click: not the pointer passing over it, nor a press that
+    /// may be the start of moving it. (A test run can't come in front; the
+    /// keys it can see.)
     func testClickOnFloatingWindowGivesItTheKeysWhileSearchIsBehind() throws {
         _ = NSApplication.shared
         NSApp.setActivationPolicy(.prohibited)
@@ -88,6 +105,8 @@ final class FloatPinchTests: XCTestCase {
         controls.mouseEntered(with: NSEvent())
         XCTAssertFalse(panel.isKeyWindow, "passing over it takes nothing from the app in front")
         controls.mouseDown(with: Click())
+        XCTAssertFalse(panel.isKeyWindow, "pressing may be the start of moving it")
+        controls.mouseUp(with: Click())
         XCTAssertTrue(panel.isKeyWindow)
     }
 

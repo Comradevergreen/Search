@@ -5246,12 +5246,12 @@ final class Browser: NSObject, ObservableObject {
 
     func appLeft() {
         guard prefs.floatsAway, Browsers.front == nil || Browsers.front === self else { return }
-        // Leaving a link's small window is another app switch, but the
-        // video still belongs to the first one that took it out. Asked all
-        // the same: macOS's own controls can end picture in picture without
-        // Search hearing, and only the page knows it is no longer there.
-        if !floater.showing, pictured == nil { liftedAway = true }
-        lift(active, quietly: true, otherwise: otherPane)
+        // Marked only once this switch has taken one out: one out already
+        // stays whoever's it was, and leaving a link's small window is
+        // another switch. Asked all the same: macOS's own controls can end
+        // picture in picture without Search hearing, and only the page knows
+        // it is no longer there.
+        lift(active, quietly: true, otherwise: otherPane, away: true)
     }
 
     /// Back in this browser window, and still on the tab it came from:
@@ -5284,25 +5284,31 @@ final class Browser: NSObject, ObservableObject {
     private(set) var pictured: Tab.ID?
 
     /// The video playing in `tab` into picture in picture (NativePiP).
-    /// `toggle`: ⇧⌘P, which also brings one back.
-    private func picture(_ tab: Tab?, quietly: Bool, toggle: Bool = false, otherwise: Tab? = nil) {
+    /// `toggle`: ⇧⌘P, which also brings one back. `away`: leaving the app,
+    /// which marks what it takes out (see liftedAway).
+    private func picture(_ tab: Tab?, quietly: Bool, toggle: Bool = false, otherwise: Tab? = nil, away: Bool = false) {
         guard let tab, !tab.isBlank, !tab.asleep, tab.web.fullscreenState == .notInFullscreen else {
-            if let otherwise { picture(otherwise, quietly: quietly, toggle: toggle) }
+            if let otherwise { picture(otherwise, quietly: quietly, toggle: toggle, away: away) }
             return
         }
         if quietly, !Players.knows(tab.address) || tab.pageAddress?.host().map(Grounded.holds) == true {
-            if let otherwise { picture(otherwise, quietly: quietly, toggle: toggle) }
+            if let otherwise { picture(otherwise, quietly: quietly, toggle: toggle, away: away) }
             return
         }
         tab.web.evaluateInSearch(NativePiP.script(toggle: toggle)) { [weak self, weak tab] answer in
             MainActor.assumeIsolated {
                 guard let self, let tab else { return }
                 switch answer as? String {
-                case "in": self.pictured = tab.id
+                case "in":
+                    self.pictured = tab.id
+                    if away { self.liftedAway = true }
+                // Out already, by hand or by the page's own button: it stays
+                // whoever's it was.
+                case "still": self.pictured = tab.id
                 case "out": if self.pictured == tab.id { self.pictured = nil }
                 case "refused": if !quietly { self.announce("This page keeps its video to itself") }
                 default:
-                    if let otherwise { return self.picture(otherwise, quietly: quietly, toggle: toggle) }
+                    if let otherwise { return self.picture(otherwise, quietly: quietly, toggle: toggle, away: away) }
                     if !quietly { self.announce("Nothing is playing here") }
                 }
             }
@@ -5320,13 +5326,14 @@ final class Browser: NSObject, ObservableObject {
     /// Everything but the video goes out of the way, and the page it lives in
     /// moves house — into a small window that stays above everything.
     /// `otherwise`: the other page of a pair, tried when this one has
-    /// nothing playing.
-    private func lift(_ tab: Tab?, quietly: Bool, otherwise: Tab? = nil) {
-        if prefs.floatStyle == .system { return picture(tab, quietly: quietly, otherwise: otherwise) }
+    /// nothing playing. `away`: leaving the app, which marks what it takes
+    /// out (see liftedAway).
+    private func lift(_ tab: Tab?, quietly: Bool, otherwise: Tab? = nil, away: Bool = false) {
+        if prefs.floatStyle == .system { return picture(tab, quietly: quietly, otherwise: otherwise, away: away) }
         // A tab just put down with ⌘W has no page to lift a video out of, and
         // asking it would only build an empty view to ask.
         guard let tab, tab.isWeb, !tab.asleep, !floater.showing else {
-            if let otherwise { lift(otherwise, quietly: quietly) }
+            if let otherwise { lift(otherwise, quietly: quietly, away: away) }
             return
         }
         // A video filling the screen stays in its own space, as in Safari.
@@ -5339,7 +5346,7 @@ final class Browser: NSObject, ObservableObject {
         // followed people around the desktop. Nor from one you grounded in
         // its site card. ⌘⇧P still lifts from anywhere.
         if quietly, !Players.knows(tab.address) || tab.pageAddress?.host().map(Grounded.holds) == true {
-            if let otherwise { lift(otherwise, quietly: quietly) }
+            if let otherwise { lift(otherwise, quietly: quietly, away: away) }
             return
         }
         // A picture of the page as it is, asked for in the same breath as the
@@ -5371,7 +5378,7 @@ final class Browser: NSObject, ObservableObject {
         stage?.keep(tab.web)
         func both() {
             guard let shot, let found else { return }
-            lifted(tab, shot: shot, found: found, quietly: quietly, otherwise: otherwise)
+            lifted(tab, shot: shot, found: found, quietly: quietly, otherwise: otherwise, away: away)
             stage?.letGo(tab.web)
         }
         tab.web.takeSnapshot(with: picture) { image, _ in
@@ -5390,9 +5397,9 @@ final class Browser: NSObject, ObservableObject {
 
     /// The page isolated, or not, and pictured as it was before: into the
     /// little window, or on to the other page of a pair.
-    private func lifted(_ tab: Tab, shot: NSImage?, found answer: Any?, quietly: Bool, otherwise: Tab?) {
+    private func lifted(_ tab: Tab, shot: NSImage?, found answer: Any?, quietly: Bool, otherwise: Tab?, away: Bool) {
         guard let found = answer as? [String: Any], found["floating"] as? Bool == true else {
-            if let otherwise { return lift(otherwise, quietly: quietly) }
+            if let otherwise { return lift(otherwise, quietly: quietly, away: away) }
             if !quietly { announce("Nothing is playing here") }
             return
         }
@@ -5406,6 +5413,7 @@ final class Browser: NSObject, ObservableObject {
         leftAs = left.map { (tab.id, $0) }
         floating = tab.id
         tab.floating = true
+        if away { liftedAway = true }
         ownFloater()
         let still = shot.flatMap { shot in
             Float.still(
