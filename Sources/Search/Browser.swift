@@ -5246,19 +5246,27 @@ final class Browser: NSObject, ObservableObject {
 
     func appLeft() {
         guard prefs.floatsAway, Browsers.front == nil || Browsers.front === self else { return }
-        liftedAway = !floater.showing && pictured == nil
+        // Leaving a link's small window is another app switch, but the
+        // video still belongs to the first one that took it out. Asked all
+        // the same: macOS's own controls can end picture in picture without
+        // Search hearing, and only the page knows it is no longer there.
+        if !floater.showing, pictured == nil { liftedAway = true }
         lift(active, quietly: true, otherwise: otherPane)
     }
 
-    /// Back, and still on the tab it came from: into the tab again.
-    func appBack() {
-        defer { liftedAway = false }
-        if liftedAway, let id = floating, id == activeID { land() }
-        if liftedAway, let id = pictured, id == activeID { unpicture() }
+    /// Back in this browser window, and still on the tab it came from:
+    /// into the tab again. A link's small window activates Search too.
+    func appBack(in front: NSWindow?) {
+        guard let window, front === window, liftedAway else { return }
+        liftedAway = false
+        if let id = floating, id == activeID { land() }
+        if let id = pictured, id == activeID { unpicture() }
     }
 
     /// ⌘⇧P, for lifting one out by hand.
     func toggleFloat() {
+        // By hand, it goes home by hand too.
+        liftedAway = false
         if floater.showing {
             land()
             return
@@ -5305,6 +5313,7 @@ final class Browser: NSObject, ObservableObject {
     func unpicture() {
         guard let id = pictured else { return }
         pictured = nil
+        liftedAway = false
         tabs.first { $0.id == id }?.web.evaluateInSearch(NativePiP.off)
     }
 
@@ -5428,6 +5437,8 @@ final class Browser: NSObject, ObservableObject {
         if floating == nil, let owner = Browsers.all.first(where: { $0 !== self && $0.floating != nil }) {
             return owner.land(covering: covering)
         }
+        // Home, however it got here: a float lifted later is not this one.
+        liftedAway = false
         // The window closes whatever else is true. Tying that to the bookkeeping
         // is how a little window outlives the thing that opened it.
         if floater.showing { floater.drop() }

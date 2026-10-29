@@ -22,6 +22,7 @@ in [ROADMAP.md](ROADMAP.md).
 
 ### Fixed
 
+- Opening a link from another app in a small window keeps an automatically floated video on screen. It goes back into its tab only when that browser window comes forward, including after switching away from the small window and back again.
 - With tabs across the top, a Split View pair is as tall as the tabs beside it (it stood 40 points high beside 28), and its close button stays under the pointer: moving onto it no longer took the hover from the half under it, so it no longer faded out or changed which page it closes on the way. Reported on X
 - Moving the column to the other side while it is folded away leaves the red, yellow and green buttons in the bar that comes down with the menu bar in full screen. They went missing from it until the column next came out. With several windows open, a window's buttons no longer follow another window's column when the side changes. Thanks [@Tom-Boscher](https://github.com/Tom-Boscher) ([#767](https://github.com/driceroland/Search/pull/767))
 - A window brought back in full screen at launch, or opened with ⌘N from a window in full screen, has its red, yellow and green buttons at the top of the screen when the menu bar comes down, as any window in full screen does. They showed at the bottom-left corner of the window instead, and sank out of reach as the pointer went to them, until the window left full screen. Thanks [@Tom-Boscher](https://github.com/Tom-Boscher) ([#766](https://github.com/driceroland/Search/pull/766))
