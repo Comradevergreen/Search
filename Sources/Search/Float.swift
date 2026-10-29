@@ -93,6 +93,33 @@ final class Float {
     /// everywhere else.
     static var benchScreens: [NSRect]?
 
+    /// A trackpad pinch goes to the window with the keys, not to the one
+    /// under the fingers, and this one has them only once clicked: every
+    /// pinch over it went to the browser window behind it and sized nothing.
+    /// So pinches are caught on their way in, and one that starts over a
+    /// floating window is that window's until the fingers lift.
+    private static var pinchWatch: Any?
+    private static weak var pinched: Panel?
+
+    private static func watchPinches() {
+        guard pinchWatch == nil else { return }
+        pinchWatch = NSEvent.addLocalMonitorForEvents(matching: .magnify) { event in
+            steer(event) ? nil : event
+        }
+    }
+
+    /// Whether `event`, a pinch, was a floating window's, and went to it.
+    static func steer(_ event: NSEvent) -> Bool {
+        if event.phase == .began || event.phase.isEmpty {
+            let spot = event.window.map { $0.convertPoint(toScreen: event.locationInWindow) } ?? event.locationInWindow
+            pinched = NSApp.windows.lazy.compactMap { $0 as? Panel }.first { $0.isVisible && $0.frame.contains(spot) }
+        }
+        guard let panel = pinched else { return false }
+        panel.onPinch?(event)
+        if event.phase.isEmpty || !event.phase.isDisjoint(with: [.ended, .cancelled]) { pinched = nil }
+        return true
+    }
+
     /// `still`: the video as it was in its tab, cut out of a picture of the
     /// page (see `still(of:picture:page:)`), shown until the page is laid out
     /// at this window's size.
@@ -196,6 +223,8 @@ final class Float {
         controls.onSkip = { [weak self] seconds in self?.onSkip?(seconds) }
         ground.addSubview(controls)
         self.controls = controls
+        panel.onPinch = { [weak controls] event in controls?.magnify(with: event) }
+        Float.watchPinches()
 
         panel.contentView = ground
         panel.orderFrontRegardless()
@@ -483,7 +512,23 @@ final class Float {
             )
         }
 
+        /// With another app in front, a pinch goes to that app and Search
+        /// never hears it: macOS sends gestures to the app in front, and the
+        /// keys alone, which this panel can take without it, are not enough.
+        /// So a click on it brings Search in front, with this window holding
+        /// the keys, as Arc's does. Its browser window does not take them
+        /// back, so the video stays out (see Browser.appBack). With Search in
+        /// front already, the keys stay where they are, and Float.steer
+        /// brings the pinch here.
+        private func takeFocus() {
+            let front = NSWorkspace.shared.frontmostApplication?.processIdentifier
+            guard let window, front != ProcessInfo.processInfo.processIdentifier else { return }
+            window.makeKey()
+            if #available(macOS 14, *) { NSApp.activate() } else { NSApp.activate(ignoringOtherApps: true) }
+        }
+
         override func mouseDown(with event: NSEvent) {
+            takeFocus()
             guard let window else { return }
             // A click on the sliver of a docked window brings it back.
             if docked != nil {
@@ -934,6 +979,8 @@ enum Grounded {
 private final class Panel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
+    /// A pinch over it, whichever window the system sent it to (see Float.steer).
+    var onPinch: ((NSEvent) -> Void)?
 }
 
 /// Waits for a page moved between the tab and the floating window to settle
