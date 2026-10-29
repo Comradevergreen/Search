@@ -31,6 +31,8 @@ final class LittleWindow: NSObject, NSWindowDelegate {
     private var cascaded = false
     /// What it says for a moment at its foot: "Address copied".
     private let note = LittleNote()
+    /// No smaller than this, by hand or from a kept place.
+    private static let smallest = NSSize(width: 420, height: 320)
 
     /// A link from another app, in a small window in front of it.
     /// `front: false` makes it without showing it — for the bench, which
@@ -160,7 +162,7 @@ final class LittleWindow: NSObject, NSWindowDelegate {
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
         window.isReleasedWhenClosed = false
-        window.minSize = NSSize(width: 420, height: 320)
+        window.minSize = Self.smallest
         if let frame = Self.remembered {
             window.setFrame(frame, display: false)
         } else {
@@ -333,13 +335,14 @@ final class LittleWindow: NSObject, NSWindowDelegate {
         switcher.left(tab, alive: Set(LittleWindow.open.map(\.tab.id)))
     }
 
-    /// Keep the last place used, as the floating video does. A screen
-    /// removed since the last visit must not strand the next link off screen.
+    /// The last place used, given back only while a screen still shows most
+    /// of it, as the floating video's is: a screen removed since the last
+    /// visit must not strand the next link off screen.
     private static var remembered: NSRect? {
         guard let text = Store.settings.string(forKey: "little.frame") else { return nil }
         let frame = NSRectFromString(text)
         guard [frame.minX, frame.minY, frame.width, frame.height].allSatisfy(\.isFinite),
-              frame.width >= 420, frame.height >= 320 else { return nil }
+              frame.width >= smallest.width, frame.height >= smallest.height else { return nil }
         return NSScreen.screens.contains {
             let seen = $0.visibleFrame.intersection(frame)
             return !seen.isNull && seen.width * seen.height > 0.6 * frame.width * frame.height

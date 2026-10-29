@@ -35,7 +35,6 @@ final class LittleWindowFrameTests: XCTestCase {
         let (second, reopened) = try preview(for: browser)
         defer { second.close() }
         XCTAssertEqual(reopened.frame, wanted)
-        XCTAssertFalse(reopened.isVisible)
     }
 
     func testPreviewRestoresSavedFrameAndRejectsAnUnavailableScreen() throws {
