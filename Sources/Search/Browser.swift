@@ -3577,15 +3577,17 @@ final class Browser: NSObject, ObservableObject {
     }
 
     /// ⌘W closes what is in front: a peek, then a card over the page (What's
-    /// New), then the tab. Settings, History and the rest are tabs of their
-    /// own, as in Chrome, and ⌘W on one closes it. Escape puts things away
-    /// in the same order, so the two keys agree on what is in front.
+    /// New), then the tabs picked in the column, or else the tab. Settings,
+    /// History and the rest are tabs of their own, as in Chrome, and ⌘W on
+    /// one closes it. Escape puts things away in the same order, so the two
+    /// keys agree on what is in front.
     func closeFront() {
         // The floating new tab is the thing in front: ⌘W takes it away and
         // leaves the page under it.
         if launching { dismiss(); return }
         if peekTab != nil { closePeek() }
         else if closePanel() { return }
+        else if !pickedTabs.isEmpty { closePickedTabs() }
         else if let tab = active { closeTab(tab) }
     }
 
@@ -3797,6 +3799,21 @@ final class Browser: NSObject, ObservableObject {
                 }
                 close(page)
             }
+        }
+    }
+
+    /// ⌘W, or the tab menu's Close Tabs, with tabs picked in the column (⌘-
+    /// or ⇧-click): each one closed as ⌘W closes it — a pin put down, a tab
+    /// in a group put away — and all remembered as one, so one ⇧⌘T brings
+    /// them back. The pages on screen go last: closed first, a neighbour
+    /// would wake only to be closed.
+    func closePickedTabs() {
+        let going = pickedTabs, onScreen = visibleTabIDs
+        guard !going.isEmpty else { return }
+        clearTabSelection()
+        closingTogether(.tabs) { _ in
+            for tab in going where !onScreen.contains(tab.id) { closeTab(tab) }
+            for tab in going where onScreen.contains(tab.id) { closeTab(tab) }
         }
     }
 
