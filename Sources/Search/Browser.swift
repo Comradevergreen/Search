@@ -5482,6 +5482,10 @@ final class Browser: NSObject, ObservableObject {
         }
         tab.onPickEnd = { [weak self] _ in self?.veiling = false }
         tab.onImageMenu = { [weak self] tab, url in self?.showImageMenu(for: tab, at: url) }
+        tab.onImageItem = { [weak self] tab, url, copy in
+            guard let self, let web = tab.built else { return }
+            if copy { copyImage(at: url, in: tab) } else { downloadImage(at: url, from: web) }
+        }
         tab.searchName = { [weak self] in self.map { $0.prefs.engine.name(custom: $0.prefs.customEngine) } }
         tab.onSearch = { [weak self] tab, text in
             guard let self, let url = self.searchURL(for: text) else { return }

@@ -599,6 +599,9 @@ final class Tab: ObservableObject, Identifiable {
     /// download it and then, on at least some sites, does neither — see
     /// ImageMenu.swift for why this is built rather than patched.
     var onImageMenu: ((Tab, URL) -> Void)?
+    /// WebKit's Copy Image (true) or Download Image (false) chosen over a
+    /// picture that is also a link, done as the image menu does them.
+    var onImageItem: ((Tab, URL, Bool) -> Void)?
     /// Where the last image right-clicked came from (see ImageMenu.swift).
     var imageFrame: WKFrameInfo? { images.frame }
     var searchName: (() -> String?)?
@@ -881,6 +884,10 @@ final class Tab: ObservableObject, Identifiable {
         web.searchName = { [weak self] in self?.searchName?() }
         web.translating = { [weak self] in self.map { $0.translator != nil && $0.translation?.failed != true } ?? false }
         web.onTranslate = { [weak self] in self?.toggleTranslation() }
+        web.onImage = { [weak self] url, copy in
+            guard let self else { return }
+            self.onImageItem?(self, url, copy)
+        }
         web.onSearch = { [weak self] text in
             guard let self else { return }
             self.onSearch?(self, text)
@@ -1853,6 +1860,7 @@ final class Tab: ObservableObject, Identifiable {
         web.searchName = nil
         web.translating = nil
         web.onTranslate = nil
+        web.onImage = nil
         web.onSearch = nil
         web.stopLoading()
         // Detaching a view doesn't end capture while something still holds it.
@@ -2098,6 +2106,20 @@ final class PageView: WKWebView {
             clean.representedObject = url
             menu.insertItem(clean, at: index + 1)
         }
+        // A picture that is also a link keeps this menu (ImageRelay), and
+        // with it WebKit's Copy Image and Download Image, which on some sites
+        // do nothing: this app's own do them instead, as its picture menu
+        // does. Told of the picture just before this menu, for this menu only.
+        if let image = keptImage {
+            keptImage = nil
+            for (id, action) in [("WKMenuItemIdentifierCopyImage", #selector(copyImage(_:))),
+                                 ("WKMenuItemIdentifierDownloadImage", #selector(downloadImage(_:)))] {
+                guard let item = menu.items.first(where: { $0.identifier?.rawValue == id }) else { continue }
+                item.target = self
+                item.action = action
+                item.representedObject = image
+            }
+        }
         // The bench's linkmenu: the item it names is chosen as the menu
         // comes up, the way a hand would choose it, and the menu goes.
         if Store.testing, let title = PageView.picking {
@@ -2203,6 +2225,20 @@ final class PageView: WKWebView {
     @objc private func copyCleanPage(_ item: NSMenuItem) {
         guard let url = item.representedObject as? URL else { return }
         CleanLink.copy(url)
+    }
+
+    /// The picture under the right-click, when this menu is WebKit's over
+    /// one (see ImageRelay), or nil.
+    var keptImage: URL?
+    /// Copy Image (true) or Download Image (false), this app's own.
+    var onImage: ((URL, Bool) -> Void)?
+
+    @objc private func copyImage(_ item: NSMenuItem) {
+        if let url = item.representedObject as? URL { onImage?(url, true) }
+    }
+
+    @objc private func downloadImage(_ item: NSMenuItem) {
+        if let url = item.representedObject as? URL { onImage?(url, false) }
     }
 
     /// Open Link in Split View: the same action, the tab it makes marked to
